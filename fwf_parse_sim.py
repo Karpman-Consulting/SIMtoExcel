@@ -4,6 +4,8 @@ import tkinter as tk
 from tkinter import filedialog
 import xlsxwriter
 import math
+from openpyxl import load_workbook
+
 import add_logo
 
 
@@ -905,6 +907,41 @@ class SIMFileReader:
             ps_c_ws.set_column(1, 1, 10)
             ps_c_ws.set_column(2, 5, 16)
 
+            ps_c_ws.autofilter(0, 0, row, len(self.ps_c_data[0]) - 1)
+            ps_c_ws.filter_column(1, 'Type == SUM')  # Filter column B (index 1)
+
+            ps_c_ws.set_column('G:S', None, None, {'hidden': True}) # Hide columns G through S
+
+            row = 1
+            for row_idx in range(1, len(self.ps_c_data)):  # Start at row 1 (Excel row 2)
+                excel_row = row_idx + 1  # Excel rows are 1-indexed
+
+                formula = f'=IFERROR(ABS(D{excel_row}/((E{excel_row}*3.412)/1000)),"")'
+                ps_c_ws.write_formula(row_idx, 19, formula)  # Column T is index 19
+
+            t_column_format = workbook.add_format({
+                'bold': True,
+                'font_size': 14,
+                'text_wrap': True
+            })
+
+            ps_c_ws.write('T1', 'Heating Efficiency', t_column_format)
+
+            caution_format = workbook.add_format({
+                'font_color': 'red',
+                'bold': True,
+                'text_wrap': False  # Disable wrapping
+            })
+
+            caution_text = (
+                "1. Click the filter button in cell B1 and then click OK to filter the data.  \n"
+                "2. ⚠️ If a piece of equipment provides both heating and cooling, "
+                "the calculated heating efficiency will not be accurate."
+            )
+
+            ps_c_ws.write('U1', caution_text, caution_format)
+
+
         if self.pv_a_data:
             pv_a0_ws = workbook.add_worksheet('PV-A Loops')
             for row, data in enumerate(self.pv_a_data[0]):
@@ -942,11 +979,12 @@ class SIMFileReader:
         if self.ss_a_data:
             ss_a_ws = workbook.add_worksheet('SS-A')
             for row, data in enumerate(self.ss_a_data):
+                excel_row = row + 2  # Shift everything down by two rows
                 if row == 0:
-                    ss_a_ws.write_row(row, 0, data, header_format)
+                    ss_a_ws.write_row(excel_row, 0, data, header_format)
                 else:
                     data = try_convert_element_to_float(data)
-                    ss_a_ws.write_row(row, 0, data)
+                    ss_a_ws.write_row(excel_row, 0, data)
             ss_a_ws.set_column(0, 1, 18.71)
             ss_a_ws.set_column(2, 3, 9.29)
             ss_a_ws.set_column(4, 5, 11.00)
@@ -956,6 +994,54 @@ class SIMFileReader:
             ss_a_ws.set_column(10, 11, 11.00)
             ss_a_ws.set_column(12, 12, 12.14)
             ss_a_ws.set_column(13, 14, 11.57)
+
+            # === FORMATS ===
+            calcs_format = workbook.add_format({'bold': True})
+            calcs_heading_format = workbook.add_format({'bold': True, 'text_wrap': True})
+            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
+
+            # === FILTER SETUP ===
+            header_row = 2  # Excel row 3
+            ss_a_ws.autofilter(header_row, 0, excel_row, len(self.ss_a_data[0]) - 1)
+            ss_a_ws.filter_column(1, 'Type == TOTAL')  # Column B
+
+            # === FORMULAS ===
+            start_row = 4
+            end_row = excel_row + 2
+
+            formulas = {
+                'C2': f'=SUBTOTAL(9,C{start_row}:C{end_row})',
+                'D2': '=(BEPU!G2*3.412)/1000',
+                'E2': '=ABS(C2)/D2',
+                'I2': f'=SUBTOTAL(9,I{start_row}:I{end_row})',
+                'J2': '=(BEPU!F2+BEPU!L2)*3.412*(1/1000)',
+                'K2': '=ABS(I2)/J2'
+            }
+
+            for cell, formula in formulas.items():
+                ss_a_ws.write_formula(cell, formula, calcs_format)
+
+            # === HEADINGS ===
+            headings = {
+                'C1': "Total Cooling Load, MMBtu",
+                'D1': "Cooling Consumption from BEPU tab, MMBtu",
+                'E1': "Whole Building Annualized Cooling Efficiency, COP",
+                'I1': "Total Heating Load, MMBtu",
+                'J1': "Heating Consumption from BEPU tab, MMBtu",
+                'K1': "Whole Building Annualized Heating Efficiency, COP"
+            }
+
+            for cell, text in headings.items():
+                ss_a_ws.write(cell, text, calcs_heading_format)
+
+            # === CAUTION NOTES ===
+            cautions = {
+                'A1': "⚠️ Load and Efficiency will not be Accurate unless Filter is initiated in Cell B3. Click filter button and then click OK",
+                'B1': "⚠️ QC that cells D2 and J2 align with the BEPU tab and that the BEPU tab is not missing data."
+            }
+
+            for cell, text in cautions.items():
+                ss_a_ws.write(cell, text, caution_format)
 
         if self.ss_f_data:
             ss_f_ws = workbook.add_worksheet('SS-F')
@@ -967,6 +1053,11 @@ class SIMFileReader:
                     ss_f_ws.write_row(row, 0, data)
             ss_f_ws.set_column(0, 1, 26)
             ss_f_ws.set_column(2, len(self.ss_f_data[0]) - 1, 14)
+
+            ss_f_ws.set_column(11, 11, 40)
+            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
+            total_BBRD_text = "Use Column E to Verify Baseboard is Actually being Modeled where Expected"
+            ss_f_ws.write('L1', total_BBRD_text, caution_format)
 
         if self.ss_g_data:
             ss_g_ws = workbook.add_worksheet('SS-G')
@@ -988,6 +1079,16 @@ class SIMFileReader:
             ss_h_ws.set_column(0, 1, 20)
             ss_h_ws.set_column(2, len(self.ss_h_data[0]) - 1, 14)
 
+            # === FILTER SETUP ===
+            header_row = 0  # Excel row 1
+            ss_h_ws.autofilter(header_row, 0, excel_row, len(self.ss_h_data[0]) - 1)
+            ss_h_ws.filter_column(1, 'Type == TOTAL')  # Column B
+
+            ss_h_ws.set_column(12, 12, 40)
+            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
+            filter_text = "Click the filter button in cell B1 and then click OK to filter the data.  "
+            ss_h_ws.write('M1', filter_text, caution_format)
+
         if self.ss_l_data:
             ss_l_ws = workbook.add_worksheet('SS-L')
             for row, data in enumerate(self.ss_l_data):
@@ -998,6 +1099,18 @@ class SIMFileReader:
                     ss_l_ws.write_row(row, 0, data)
             ss_l_ws.set_column(0, 1, 20)
             ss_l_ws.set_column(2, len(self.ss_l_data[0]) - 1, 14)
+
+            ss_l_ws.set_column('G:Q', None, None, {'hidden': True})
+
+            # === FILTER SETUP ===
+            header_row = 0  # Excel row 1
+            ss_l_ws.autofilter(header_row, 0, excel_row, len(self.ss_l_data[0]) - 1)
+            ss_l_ws.filter_column(1, 'Type == ANNUAL')  # Column B
+
+            ss_l_ws.set_column(20, 20, 40)
+            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
+            filter_text = "Click the filter button in cell B1 and then click OK to filter the data.  "
+            ss_l_ws.write('U1', filter_text, caution_format)
 
         if self.ss_r_data:
             ss_r_ws = workbook.add_worksheet('SS-R')
