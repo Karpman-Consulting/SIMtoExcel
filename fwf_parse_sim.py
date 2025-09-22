@@ -975,6 +975,33 @@ class SIMFileReader:
 
         if self.ss_a_data:
             ss_a_ws = workbook.add_worksheet('SS-A')
+            calcs_format = workbook.add_format({'bold': True})
+            calcs_heading_format = workbook.add_format({'bold': True, 'text_wrap': True})
+            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
+
+            # === CAUTION NOTES ===
+            cautions = {
+                'A1': "⚠️ Load and Efficiency will not be Accurate unless Filter is initiated in Cell B3. Click filter button and then click OK",
+                'B1': "⚠️ QC that cells D2 and J2 align with the BEPU tab and that the BEPU tab is not missing data."
+            }
+
+            for cell, text in cautions.items():
+                ss_a_ws.write(cell, text, caution_format)
+
+            # === HEADINGS ===
+            headings = {
+                'C1': "Total Cooling Load, MMBtu",
+                'D1': "Cooling Consumption from BEPU tab, MMBtu",
+                'E1': "Whole Building Annualized Cooling Efficiency, COP",
+                'I1': "Total Heating Load, MMBtu",
+                'J1': "Heating Consumption from BEPU tab, MMBtu",
+                'K1': "Whole Building Annualized Heating Efficiency, COP"
+            }
+
+            for cell, text in headings.items():
+                ss_a_ws.write(cell, text, calcs_heading_format)
+
+            # ===  DATA  ===
             for row, data in enumerate(self.ss_a_data):
                 excel_row = row + 2  # Shift everything down by two rows
                 if row == 0:
@@ -991,11 +1018,6 @@ class SIMFileReader:
             ss_a_ws.set_column(10, 11, 11.00)
             ss_a_ws.set_column(12, 12, 12.14)
             ss_a_ws.set_column(13, 14, 11.57)
-
-            # === FORMATS ===
-            calcs_format = workbook.add_format({'bold': True})
-            calcs_heading_format = workbook.add_format({'bold': True, 'text_wrap': True})
-            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
 
             # === FILTER SETUP ===
             header_row = 2  # Excel row 3
@@ -1017,28 +1039,6 @@ class SIMFileReader:
 
             for cell, formula in formulas.items():
                 ss_a_ws.write_formula(cell, formula, calcs_format)
-
-            # === HEADINGS ===
-            headings = {
-                'C1': "Total Cooling Load, MMBtu",
-                'D1': "Cooling Consumption from BEPU tab, MMBtu",
-                'E1': "Whole Building Annualized Cooling Efficiency, COP",
-                'I1': "Total Heating Load, MMBtu",
-                'J1': "Heating Consumption from BEPU tab, MMBtu",
-                'K1': "Whole Building Annualized Heating Efficiency, COP"
-            }
-
-            for cell, text in headings.items():
-                ss_a_ws.write(cell, text, calcs_heading_format)
-
-            # === CAUTION NOTES ===
-            cautions = {
-                'A1': "⚠️ Load and Efficiency will not be Accurate unless Filter is initiated in Cell B3. Click filter button and then click OK",
-                'B1': "⚠️ QC that cells D2 and J2 align with the BEPU tab and that the BEPU tab is not missing data."
-            }
-
-            for cell, text in cautions.items():
-                ss_a_ws.write(cell, text, caution_format)
 
         if self.ss_f_data:
             ss_f_ws = workbook.add_worksheet('SS-F')
