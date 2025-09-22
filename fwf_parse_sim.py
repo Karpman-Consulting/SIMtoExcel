@@ -4,7 +4,6 @@ import tkinter as tk
 from tkinter import filedialog
 import xlsxwriter
 import math
-from openpyxl import load_workbook
 
 import add_logo
 
@@ -75,7 +74,8 @@ class SIMFileReader:
 
                 # These reports occur per system/zone, so we need to parse the system/zone name
                 if report in ["SS-A", "SS-B", "SS-F", "SS-G", "SS-H", "SS-L", "SS-R", "SV-A"]:
-                    system_or_zone = re.split(r'\s{2,}', line)[1].strip()
+                    parts: list[str] = re.split(r"\s{2,}", line)
+                    system_or_zone = parts[1].strip()
                 if active_report is None:
                     active_report = report
                 if report != active_report:
@@ -298,9 +298,10 @@ class SIMFileReader:
         pump_segments = [(0, 40), (40, 48), (48, 60), (60, 72), (72, 84), (84, 96), (96, 108),
                          (108, 119)]
 
+        prim_segments = []
         if self.doe_version == "DOE-2.2":
             prim_segments = [(0, 19), (19, 53), (53, 65), (65, 77), (77, 89), (89, 101), (101, 112)]
-        if self.doe_version == "DOE-2.3":
+        elif self.doe_version == "DOE-2.3":
             prim_segments = [(0, 19), (19, 53), (53, 65), (65, 77), (77, 88)]
 
         lines = self.report_contents['PV-A']
@@ -611,8 +612,8 @@ class SIMFileReader:
                     row[10] = self.clean(values[4])  # Electric Cool Energy
                 elif month_tag == "MAX":
                     row[3] = self.clean(values[0])  # Max Fan Load
-                    row[5] = self.clean(values[1]) # Max Gas Heat Load
-                    row[7] = self.clean(values[2]) # Max Gas Cool Load
+                    row[5] = self.clean(values[1])  # Max Gas Heat Load
+                    row[7] = self.clean(values[2])  # Max Gas Cool Load
                     row[9] = self.clean(values[3])  # Max Elec Heat Load
                     row[11] = self.clean(values[4])  # Max Elec Cool Load
                 else:
@@ -856,6 +857,11 @@ class SIMFileReader:
             'font_size': 14,
             'text_wrap': True,
         })
+        caution_format = workbook.add_format({
+            'font_color': 'red',
+            'bold': True,
+            'text_wrap': True
+        })
 
         if self.bepu_data:
             bepu_ws = workbook.add_worksheet("BEPU")
@@ -897,6 +903,12 @@ class SIMFileReader:
 
         if self.ps_c_data:
             ps_c_ws = workbook.add_worksheet("PS-C")
+            t_column_format = workbook.add_format({
+                'bold': True,
+                'font_size': 14,
+                'text_wrap': True
+            })
+
             for row, data in enumerate(self.ps_c_data):
                 if row == 0:
                     ps_c_ws.write_row(row, 0, data, header_format)
@@ -907,31 +919,17 @@ class SIMFileReader:
             ps_c_ws.set_column(1, 1, 10)
             ps_c_ws.set_column(2, 5, 16)
 
-            ps_c_ws.autofilter(0, 0, row, len(self.ps_c_data[0]) - 1)
+            ps_c_ws.autofilter(0, 0, len(self.ps_c_data) - 1, len(self.ps_c_data[0]) - 1)
             ps_c_ws.filter_column(1, 'Type == SUM')  # Filter column B (index 1)
+            ps_c_ws.set_column('G:S', None, None, {'hidden': True})  # Hide columns G through S
 
-            ps_c_ws.set_column('G:S', None, None, {'hidden': True}) # Hide columns G through S
-
-            row = 1
             for row_idx in range(1, len(self.ps_c_data)):  # Start at row 1 (Excel row 2)
                 excel_row = row_idx + 1  # Excel rows are 1-indexed
 
                 formula = f'=IFERROR(ABS(D{excel_row}/((E{excel_row}*3.412)/1000)),"")'
                 ps_c_ws.write_formula(row_idx, 19, formula)  # Column T is index 19
 
-            t_column_format = workbook.add_format({
-                'bold': True,
-                'font_size': 14,
-                'text_wrap': True
-            })
-
             ps_c_ws.write('T1', 'Heating Efficiency', t_column_format)
-
-            caution_format = workbook.add_format({
-                'font_color': 'red',
-                'bold': True,
-                'text_wrap': False  # Disable wrapping
-            })
 
             caution_text = (
                 "1. Click the filter button in cell B1 and then click OK to filter the data.  \n"
@@ -940,7 +938,6 @@ class SIMFileReader:
             )
 
             ps_c_ws.write('U1', caution_text, caution_format)
-
 
         if self.pv_a_data:
             pv_a0_ws = workbook.add_worksheet('PV-A Loops')
@@ -1002,12 +999,12 @@ class SIMFileReader:
 
             # === FILTER SETUP ===
             header_row = 2  # Excel row 3
-            ss_a_ws.autofilter(header_row, 0, excel_row, len(self.ss_a_data[0]) - 1)
+            ss_a_ws.autofilter(header_row, 0, len(self.ss_a_data) - 1, len(self.ss_a_data[0]) - 1)
             ss_a_ws.filter_column(1, 'Type == TOTAL')  # Column B
 
             # === FORMULAS ===
             start_row = 4
-            end_row = excel_row + 2
+            end_row = len(self.ss_a_data) + 2
 
             formulas = {
                 'C2': f'=SUBTOTAL(9,C{start_row}:C{end_row})',
@@ -1056,8 +1053,8 @@ class SIMFileReader:
 
             ss_f_ws.set_column(11, 11, 40)
             caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
-            total_BBRD_text = "Use Column E to Verify Baseboard is Actually being Modeled where Expected"
-            ss_f_ws.write('L1', total_BBRD_text, caution_format)
+            total_bbrd_text = "Use Column E to Verify Baseboard is Actually being Modeled where Expected"
+            ss_f_ws.write('L1', total_bbrd_text, caution_format)
 
         if self.ss_g_data:
             ss_g_ws = workbook.add_worksheet('SS-G')
@@ -1081,11 +1078,11 @@ class SIMFileReader:
 
             # === FILTER SETUP ===
             header_row = 0  # Excel row 1
-            ss_h_ws.autofilter(header_row, 0, excel_row, len(self.ss_h_data[0]) - 1)
+            ss_h_ws.autofilter(header_row, 0, len(self.ss_h_data) - 1, len(self.ss_h_data[0]) - 1)
             ss_h_ws.filter_column(1, 'Type == TOTAL')  # Column B
 
             ss_h_ws.set_column(12, 12, 40)
-            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
+
             filter_text = "Click the filter button in cell B1 and then click OK to filter the data.  "
             ss_h_ws.write('M1', filter_text, caution_format)
 
@@ -1104,7 +1101,7 @@ class SIMFileReader:
 
             # === FILTER SETUP ===
             header_row = 0  # Excel row 1
-            ss_l_ws.autofilter(header_row, 0, excel_row, len(self.ss_l_data[0]) - 1)
+            ss_l_ws.autofilter(header_row, 0, len(self.ss_l_data) - 1, len(self.ss_l_data[0]) - 1)
             ss_l_ws.filter_column(1, 'Type == ANNUAL')  # Column B
 
             ss_l_ws.set_column(20, 20, 40)
