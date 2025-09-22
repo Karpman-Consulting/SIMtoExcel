@@ -856,12 +856,15 @@ class SIMFileReader:
             'valign': 'vcenter',  # Vertically centered alignment
             'font_size': 14,
             'text_wrap': True,
+            'bg_color': '#D9E1F2',
         })
         caution_format = workbook.add_format({
             'font_color': 'red',
             'bold': True,
             'text_wrap': True
         })
+        number_format = workbook.add_format({'num_format': '0.00'})
+        string_format = workbook.add_format({'num_format': '@'})
 
         if self.bepu_data:
             bepu_ws = workbook.add_worksheet("BEPU")
@@ -875,11 +878,27 @@ class SIMFileReader:
 
         if self.lv_b_data:
             lv_b_ws = workbook.add_worksheet('LV-B')
-            for row, data in enumerate(self.lv_b_data):
-                if row == 0:
-                    lv_b_ws.write_row(row, 0, data, header_format)
-                else:
-                    lv_b_ws.write_row(row, 0, data)
+
+            # Define which columns are numeric (based on your sample)
+            # Columns: 0–11 → ['Floor Name', 'Space Name', 'Multiplier', 'Space Type', 'Azimuth', 'LPD', 'People', 'EPD', 'Infil. Method', 'ACH', 'Area', 'Volume']
+            numeric_cols = {2, 4, 5, 6, 7, 9, 10, 11}
+
+            for row_idx, row_data in enumerate(self.lv_b_data):
+                for col_idx, value in enumerate(row_data):
+                    if row_idx == 0:
+                        # Header row
+                        lv_b_ws.write(row_idx, col_idx, value, header_format)
+                    else:
+                        # Data rows
+                        if col_idx in numeric_cols:
+                            try:
+                                lv_b_ws.write_number(row_idx, col_idx, float(value), number_format)
+                            except ValueError:
+                                lv_b_ws.write(row_idx, col_idx, value, string_format)
+                        else:
+                            lv_b_ws.write_string(row_idx, col_idx, str(value), string_format)
+
+            # Set column widths
             lv_b_ws.set_column(0, 0, 19.94)
             lv_b_ws.set_column(1, 1, 32.04)
             lv_b_ws.set_column(2, 5, 13.57)
@@ -893,6 +912,7 @@ class SIMFileReader:
                 if row == 1:
                     lv_d_ws.write_row(row, 0, data, header_format)
                 else:
+                    data = try_convert_element_to_float(data)
                     lv_d_ws.write_row(row, 0, data)
             lv_d_ws.set_column(0, 0, 31.14)
             lv_d_ws.set_column(1, 1, 38.71)
@@ -907,6 +927,12 @@ class SIMFileReader:
                 'bold': True,
                 'font_size': 14,
                 'text_wrap': True
+            })
+
+            caution_format_ps_c = workbook.add_format({
+                'font_color': 'red',
+                'bold': True,
+                'text_wrap': False
             })
 
             for row, data in enumerate(self.ps_c_data):
@@ -937,7 +963,7 @@ class SIMFileReader:
                 "the calculated heating efficiency will not be accurate."
             )
 
-            ps_c_ws.write('U1', caution_text, caution_format)
+            ps_c_ws.write('U1', caution_text, caution_format_ps_c)
 
         if self.pv_a_data:
             pv_a0_ws = workbook.add_worksheet('PV-A Loops')
