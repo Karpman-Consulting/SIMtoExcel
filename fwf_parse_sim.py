@@ -4,10 +4,6 @@ import tkinter as tk
 from tkinter import filedialog
 import xlsxwriter
 import math
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.worksheet.worksheet import Worksheet
 
 import add_logo
 
@@ -50,17 +46,6 @@ class SIMFileReader:
             "SV-A": "parse_sv_a",
         }
 
-    def _last_row(self, sheet, columns):
-        row = sheet.max_row
-        while row > 1 and all(sheet.cell(row=row, column=col).value is None for col in columns):
-            row -= 1
-        return row
-
-    def _format_header(self, cell, text, fill, size=12):
-        cell.value = text
-        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        cell.font = Font(bold=True, size=size)
-        cell.fill = fill
     @staticmethod
     def clean(val):
         try:
@@ -865,12 +850,13 @@ class SIMFileReader:
         return
 
     def write_excel(self):
-        file_name = self.file_name
         workbook = xlsxwriter.Workbook(self.wb_name)
+
+        # --- Formats
         header_format = workbook.add_format({
             'bold': True,
             'align': 'center',
-            'valign': 'vcenter',  # Vertically centered alignment
+            'valign': 'vcenter',
             'font_size': 14,
             'text_wrap': True,
             'bg_color': '#D9E1F2',
@@ -882,7 +868,13 @@ class SIMFileReader:
         })
         number_format = workbook.add_format({'num_format': '0.00'})
         string_format = workbook.add_format({'num_format': '@'})
+        bold_format = workbook.add_format({'bold': True})
+        caution_merge_fmt = workbook.add_format({
+            'bold': True, 'font_color': '#FF0000', 'text_wrap': True,
+            'align': 'left', 'valign': 'vbottom'
+        })
 
+        # === BEPU ===
         if self.bepu_data:
             bepu_ws = workbook.add_worksheet("BEPU")
             for row, data in enumerate(self.bepu_data):
@@ -893,20 +885,15 @@ class SIMFileReader:
                     bepu_ws.write_row(row, 0, data)
             bepu_ws.set_column(0, len(self.bepu_data[0]) - 1, 15)
 
+        # === LV-B ===
         if self.lv_b_data:
             lv_b_ws = workbook.add_worksheet('LV-B')
-
-            # Define which columns are numeric (based on your sample)
-            # Columns: 0–11 → ['Floor Name', 'Space Name', 'Multiplier', 'Space Type', 'Azimuth', 'LPD', 'People', 'EPD', 'Infil. Method', 'ACH', 'Area', 'Volume']
             numeric_cols = {2, 4, 5, 6, 7, 9, 10, 11}
-
             for row_idx, row_data in enumerate(self.lv_b_data):
                 for col_idx, value in enumerate(row_data):
                     if row_idx == 0:
-                        # Header row
                         lv_b_ws.write(row_idx, col_idx, value, header_format)
                     else:
-                        # Data rows
                         if col_idx in numeric_cols:
                             try:
                                 lv_b_ws.write_number(row_idx, col_idx, float(value), number_format)
@@ -914,8 +901,6 @@ class SIMFileReader:
                                 lv_b_ws.write(row_idx, col_idx, value, string_format)
                         else:
                             lv_b_ws.write_string(row_idx, col_idx, str(value), string_format)
-
-            # Set column widths
             lv_b_ws.set_column(0, 0, 19.94)
             lv_b_ws.set_column(1, 1, 32.04)
             lv_b_ws.set_column(2, 5, 13.57)
@@ -923,6 +908,7 @@ class SIMFileReader:
             lv_b_ws.set_column(8, 8, 16.43)
             lv_b_ws.set_column(9, 11, 11.39)
 
+        # === LV-D ===
         if self.lv_d_data:
             lv_d_ws = workbook.add_worksheet('LV-D')
             for row, data in enumerate(self.lv_d_data[0]):
@@ -938,6 +924,7 @@ class SIMFileReader:
             lv_d_ws.merge_range("E1:F1", "Walls", header_format)
             lv_d_ws.merge_range("G1:H1", "Walls+Windows", header_format)
 
+        # === PS-C ===
         if self.ps_c_data:
             ps_c_ws = workbook.add_worksheet("PS-C")
             t_column_format = workbook.add_format({
@@ -946,12 +933,7 @@ class SIMFileReader:
                 'text_wrap': True,
                 'bg_color': '#D9E1F2'
             })
-
-            caution_format_ps_c = workbook.add_format({
-                'font_color': 'red',
-                'bold': True,
-                'text_wrap': False
-            })
+            caution_format_ps_c = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': False})
 
             for row, data in enumerate(self.ps_c_data):
                 if row == 0:
@@ -964,23 +946,26 @@ class SIMFileReader:
             ps_c_ws.set_column(2, 5, 16)
 
             ps_c_ws.autofilter(0, 0, len(self.ps_c_data) - 1, len(self.ps_c_data[0]) - 1)
-            ps_c_ws.filter_column(1, 'Type == SUM')  # Filter column B (index 1)
-            ps_c_ws.set_column('G:S', None, None, {'hidden': True})  # Hide columns G through S
+            ps_c_ws.filter_column(1, 'Type == SUM')  # keep your filter UI
+            ps_c_ws.set_column('G:S', None, None, {'hidden': True})  # Hide G:S
 
-            for row_idx in range(1, len(self.ps_c_data)):  # Start at row 1 (Excel row 2)
-                excel_row = row_idx + 1  # Excel rows are 1-indexed
-
+            for row_idx in range(1, len(self.ps_c_data)):
+                excel_row = row_idx + 1
                 formula = f'=IFERROR(ABS(D{excel_row}/((E{excel_row}*3.412)/1000)),"")'
-                ps_c_ws.write_formula(row_idx, 19, formula)  # Column T is index 19
-
+                ps_c_ws.write_formula(row_idx, 19, formula)  # T column
             ps_c_ws.write('T1', 'Heating Efficiency', t_column_format)
-
             caution_text = ("⚠️ If a piece of equipment provides both heating and cooling, "
-                "the calculated heating efficiency will not be accurate."
-            )
-
+                            "the calculated heating efficiency will not be accurate.")
             ps_c_ws.write('U1', caution_text, caution_format_ps_c)
 
+            # Hide rows not containing 'SUM'
+            # Header row is 0; start hiding from Excel row 2 (0-based row 1)
+            for r in range(1, len(self.ps_c_data)):
+                row_vals = self.ps_c_data[r]
+                if not any(isinstance(v, str) and 'SUM' in v for v in row_vals):
+                    ps_c_ws.set_row(r, options={'hidden': True})
+
+        # === PV-A ===
         if self.pv_a_data:
             pv_a0_ws = workbook.add_worksheet('PV-A Loops')
             for row, data in enumerate(self.pv_a_data[0]):
@@ -1015,37 +1000,26 @@ class SIMFileReader:
             pv_a2_ws.set_column(0, 3, 27.86)
             pv_a2_ws.set_column(3, 5, 13.57)
 
+        # === SS-A ===
         if self.ss_a_data:
             ss_a_ws = workbook.add_worksheet('SS-A')
-            calcs_format = workbook.add_format({'bold': True})
             calcs_heading_format = workbook.add_format({'bold': True, 'text_wrap': True})
-            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
 
-            # === CAUTION NOTES ===
-            cautions = {
-                'A1': "⚠️ Load and Efficiency will not be Accurate unless the 'TOTAL' Filter is Applied.",
-                'B1': "⚠️ QC that cells D2 and J2 align with the BEPU tab and that the BEPU tab is not missing data."
-            }
+            # Cautions
+            ss_a_ws.write('A1', "⚠️ Load and Efficiency will not be Accurate unless the 'TOTAL' Filter is Applied.", caution_format)
+            ss_a_ws.write('B1', "⚠️ QC that cells D2 and J2 align with the BEPU tab and that the BEPU tab is not missing data.", caution_format)
 
-            for cell, text in cautions.items():
-                ss_a_ws.write(cell, text, caution_format)
+            # Headings
+            ss_a_ws.write('C1', "Total Cooling Load, MMBtu", calcs_heading_format)
+            ss_a_ws.write('D1', "Cooling Consumption from BEPU tab, MMBtu", calcs_heading_format)
+            ss_a_ws.write('E1', "Whole Building Annualized Cooling Efficiency, COP", calcs_heading_format)
+            ss_a_ws.write('I1', "Total Heating Load, MMBtu", calcs_heading_format)
+            ss_a_ws.write('J1', "Heating Consumption from BEPU tab, MMBtu", calcs_heading_format)
+            ss_a_ws.write('K1', "Whole Building Annualized Heating Efficiency, COP", calcs_heading_format)
 
-            # === HEADINGS ===
-            headings = {
-                'C1': "Total Cooling Load, MMBtu",
-                'D1': "Cooling Consumption from BEPU tab, MMBtu",
-                'E1': "Whole Building Annualized Cooling Efficiency, COP",
-                'I1': "Total Heating Load, MMBtu",
-                'J1': "Heating Consumption from BEPU tab, MMBtu",
-                'K1': "Whole Building Annualized Heating Efficiency, COP"
-            }
-
-            for cell, text in headings.items():
-                ss_a_ws.write(cell, text, calcs_heading_format)
-
-            # ===  DATA  ===
+            # Data (shift down 2 rows like before)
             for row, data in enumerate(self.ss_a_data):
-                excel_row = row + 2  # Shift everything down by two rows
+                excel_row = row + 2
                 if row == 0:
                     ss_a_ws.write_row(excel_row, 0, data, header_format)
                 else:
@@ -1061,43 +1035,58 @@ class SIMFileReader:
             ss_a_ws.set_column(12, 12, 12.14)
             ss_a_ws.set_column(13, 14, 11.57)
 
-            # === FILTER SETUP ===
             header_row = 2  # Excel row 3
             ss_a_ws.autofilter(header_row, 0, len(self.ss_a_data) - 1, len(self.ss_a_data[0]) - 1)
-            ss_a_ws.filter_column(1, 'Type == TOTAL')  # Column B
+            # Filter UI (label says Type in your original; value is in the "Month" column which can be TOTAL)
+            ss_a_ws.filter_column(1, 'Type == TOTAL')
 
-            # === FORMULAS ===
+            # Totals / COP formulas on row 2
             start_row = 4
             end_row = len(self.ss_a_data) + 2
+            ss_a_ws.write_formula('C2', f'=SUBTOTAL(9,C{start_row}:C{end_row})', bold_format)
+            ss_a_ws.write_formula('D2', '=(BEPU!G2*3.412)/1000', bold_format)
+            ss_a_ws.write_formula('E2', '=ABS(C2)/D2', bold_format)
+            ss_a_ws.write_formula('I2', f'=SUBTOTAL(9,I{start_row}:I{end_row})', bold_format)
+            ss_a_ws.write_formula('J2', '=(BEPU!F2+BEPU!L2)*3.412*(1/1000)', bold_format)
+            ss_a_ws.write_formula('K2', '=ABS(I2)/J2', bold_format)
 
-            formulas = {
-                'C2': f'=SUBTOTAL(9,C{start_row}:C{end_row})',
-                'D2': '=(BEPU!G2*3.412)/1000',
-                'E2': '=ABS(C2)/D2',
-                'I2': f'=SUBTOTAL(9,I{start_row}:I{end_row})',
-                'J2': '=(BEPU!F2+BEPU!L2)*3.412*(1/1000)',
-                'K2': '=ABS(I2)/J2'
-            }
+            # Hide all rows not containing 'TOTAL' (from Excel row 4 down)
+            for r in range(3, len(self.ss_a_data) + 2):
+                # map to data index: r-2
+                row_vals = self.ss_a_data[r - 2]
+                if not any(isinstance(v, str) and 'TOTAL' in v for v in row_vals):
+                    ss_a_ws.set_row(r, options={'hidden': True})
 
-            for cell, formula in formulas.items():
-                ss_a_ws.write_formula(cell, formula, calcs_format)
-
+        # === SS-F ===
         if self.ss_f_data:
             ss_f_ws = workbook.add_worksheet('SS-F')
             for row, data in enumerate(self.ss_f_data):
                 if row == 0:
-                    ss_f_ws.write_row(row, 0, data, header_format)
+                    # Add a "System" column header at K1
+                    hdr = data + ["System"]
+                    ss_f_ws.write_row(row, 0, hdr, header_format)
                 else:
                     data = try_convert_element_to_float(data)
                     ss_f_ws.write_row(row, 0, data)
             ss_f_ws.set_column(0, 1, 26)
             ss_f_ws.set_column(2, len(self.ss_f_data[0]) - 1, 14)
 
+            # Caution (L1)
             ss_f_ws.set_column(11, 11, 40)
-            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
             total_bbrd_text = "Use Column E to Verify Baseboard is Actually being Modeled where Expected"
             ss_f_ws.write('L1', total_bbrd_text, caution_format)
 
+            # Populate "System" formulas in column K (index 10), matching zone names to SS-R col B
+            if self.ss_r_data:
+                last_row_r = len(self.ss_r_data)  # includes header
+                rng_a = f"'SS-R'!$A$2:$A${last_row_r}"
+                rng_b = f"'SS-R'!$B$2:$B${last_row_r}"
+                for r in range(1, len(self.ss_f_data)):
+                    excel_row = r + 1
+                    formula = f'=INDEX({rng_a},MATCH(A{excel_row},{rng_b},0),1)'
+                    ss_f_ws.write_formula(r, 10, formula)  # K column
+
+        # === SS-G ===
         if self.ss_g_data:
             ss_g_ws = workbook.add_worksheet('SS-G')
             for row, data in enumerate(self.ss_g_data):
@@ -1107,6 +1096,7 @@ class SIMFileReader:
                     data = try_convert_element_to_float(data)
                     ss_g_ws.write_row(row, 0, data)
 
+        # === SS-H ===
         if self.ss_h_data:
             ss_h_ws = workbook.add_worksheet('SS-H')
             for row, data in enumerate(self.ss_h_data):
@@ -1118,13 +1108,17 @@ class SIMFileReader:
             ss_h_ws.set_column(0, 1, 20)
             ss_h_ws.set_column(2, len(self.ss_h_data[0]) - 1, 14)
 
-            # === FILTER SETUP ===
-            header_row = 0  # Excel row 1
-            ss_h_ws.autofilter(header_row, 0, len(self.ss_h_data) - 1, len(self.ss_h_data[0]) - 1)
-            ss_h_ws.filter_column(1, 'Type == TOTAL')  # Column B
-
+            ss_h_ws.autofilter(0, 0, len(self.ss_h_data) - 1, len(self.ss_h_data[0]) - 1)
+            ss_h_ws.filter_column(1, 'Type == TOTAL')  # Month column where 'TOTAL' appears
             ss_h_ws.set_column(12, 12, 40)
 
+            # Hide rows not containing 'TOTAL' (from Excel row 2 down)
+            for r in range(1, len(self.ss_h_data)):
+                row_vals = self.ss_h_data[r]
+                if not any(isinstance(v, str) and 'TOTAL' in v for v in row_vals):
+                    ss_h_ws.set_row(r, options={'hidden': True})
+
+        # === SS-L ===
         if self.ss_l_data:
             ss_l_ws = workbook.add_worksheet('SS-L')
             for row, data in enumerate(self.ss_l_data):
@@ -1137,15 +1131,17 @@ class SIMFileReader:
             ss_l_ws.set_column(2, len(self.ss_l_data[0]) - 1, 14)
 
             ss_l_ws.set_column('G:Q', None, None, {'hidden': True})
-
-            # === FILTER SETUP ===
-            header_row = 0  # Excel row 1
-            ss_l_ws.autofilter(header_row, 0, len(self.ss_l_data) - 1, len(self.ss_l_data[0]) - 1)
-            ss_l_ws.filter_column(1, 'Type == ANNUAL')  # Column B
-
+            ss_l_ws.autofilter(0, 0, len(self.ss_l_data) - 1, len(self.ss_l_data[0]) - 1)
+            ss_l_ws.filter_column(1, 'Type == ANNUAL')
             ss_l_ws.set_column(20, 20, 40)
 
+            # Hide rows not containing 'ANNUAL' (from Excel row 2 down)
+            for r in range(1, len(self.ss_l_data)):
+                row_vals = self.ss_l_data[r]
+                if not any(isinstance(v, str) and 'ANNUAL' in v for v in row_vals):
+                    ss_l_ws.set_row(r, options={'hidden': True})
 
+        # === SS-R ===
         if self.ss_r_data:
             ss_r_ws = workbook.add_worksheet('SS-R')
             for row, data in enumerate(self.ss_r_data):
@@ -1158,178 +1154,130 @@ class SIMFileReader:
             ss_r_ws.set_column(2, 5, 14.57)
             ss_r_ws.set_column(17, 17, 15.14)
 
+        # === SV-A ===
         if self.sv_a_data:
-            sv_a0_ws = workbook.add_worksheet('SV-A Systems')
+            # Systems
+            sv_sys_ws = workbook.add_worksheet('SV-A Systems')
             for row, data in enumerate(self.sv_a_data[0]):
                 if row == 0:
-                    sv_a0_ws.write_row(row, 0, data, header_format)
+                    # Add extra headers M..P
+                    hdr = data + ["Supply CFM", "OA CFM", "Supply CFM/sf", "OA CFM/sf"]
+                    sv_sys_ws.write_row(row, 0, hdr, header_format)
                 else:
                     data = try_convert_element_to_float(data)
-                    sv_a0_ws.write_row(row, 0, data)
-            sv_a0_ws.set_column(0, 0, 31.14)
-            sv_a0_ws.set_column(1, 2, 13.57)
-            sv_a0_ws.set_column(3, 3, 12.86)
-            sv_a0_ws.set_column(4, 12, 11.43)
+                    sv_sys_ws.write_row(row, 0, data)
+            sv_sys_ws.set_column(0, 0, 31.14)
+            sv_sys_ws.set_column(1, 2, 13.57)
+            sv_sys_ws.set_column(3, 3, 12.86)
+            sv_sys_ws.set_column(4, 12, 11.43)
 
-            sv_a1_ws = workbook.add_worksheet('SV-A Fans')
+            # Fans
+            sv_fan_ws = workbook.add_worksheet('SV-A Fans')
             for row, data in enumerate(self.sv_a_data[1]):
                 if row == 0:
-                    sv_a1_ws.write_row(row, 0, data, header_format)
+                    sv_fan_ws.write_row(row, 0, data, header_format)
                 else:
                     data = try_convert_element_to_float(data)
-                    sv_a1_ws.write_row(row, 0, data)
-            sv_a1_ws.set_column(0, 0, 31.14)
-            sv_a1_ws.set_column(1, 2, 13.57)
-            sv_a1_ws.set_column(3, 3, 12.86)
-            sv_a1_ws.set_column(4, 8, 11.43)
-            sv_a1_ws.set_column(9, 9, 12.86)
-            sv_a1_ws.set_column(10, 11, 11.43)
+                    sv_fan_ws.write_row(row, 0, data)
+            sv_fan_ws.set_column(0, 0, 31.14)
+            sv_fan_ws.set_column(1, 2, 13.57)
+            sv_fan_ws.set_column(3, 3, 12.86)
+            sv_fan_ws.set_column(4, 8, 11.43)
+            sv_fan_ws.set_column(9, 9, 12.86)
+            sv_fan_ws.set_column(10, 11, 11.43)
 
-            sv_a2_ws = workbook.add_worksheet('SV-A Zones')
+            # Zones
+            sv_zn_ws = workbook.add_worksheet('SV-A Zones')
             for row, data in enumerate(self.sv_a_data[2]):
                 if row == 0:
-                    sv_a2_ws.write_row(row, 0, data, header_format)
+                    sv_zn_ws.write_row(row, 0, data, header_format)
                 else:
                     data = try_convert_element_to_float(data)
-                    sv_a2_ws.write_row(row, 0, data)
-            sv_a2_ws.set_column(0, 0, 31.14)
-            sv_a2_ws.set_column(1, 1, 26.43)
-            sv_a2_ws.set_column(2, 2, 13.57)
-            sv_a2_ws.set_column(3, 3, 12.86)
-            sv_a2_ws.set_column(4, 11, 11.43)
+                    sv_zn_ws.write_row(row, 0, data)
+            sv_zn_ws.set_column(0, 0, 31.14)
+            sv_zn_ws.set_column(1, 1, 26.43)
+            sv_zn_ws.set_column(2, 2, 13.57)
+            sv_zn_ws.set_column(3, 3, 12.86)
+            sv_zn_ws.set_column(4, 11, 11.43)
 
+            # DOAS (optional)
             if len(self.sv_a_data[3]) > 1:
-                sv_a3_ws = workbook.add_worksheet('SV-A DOAS')
+                sv_doas_ws = workbook.add_worksheet('SV-A DOAS')
                 for row, data in enumerate(self.sv_a_data[3]):
                     if row == 0:
-                        sv_a3_ws.write_row(row, 0, data, header_format)
+                        sv_doas_ws.write_row(row, 0, data, header_format)
                     else:
                         data = try_convert_element_to_float(data)
-                        sv_a3_ws.write_row(row, 0, data)
+                        sv_doas_ws.write_row(row, 0, data)
+
+            # Add Systems formulas referencing Fans (M..P)
+            last_fans_row = len(self.sv_a_data[1])  # includes header
+            fans_a = f"'SV-A Fans'!$A$2:$A${last_fans_row}"
+            fans_b = f"'SV-A Fans'!$B$2:$B${last_fans_row}"
+            fans_c = f"'SV-A Fans'!$C$2:$C${last_fans_row}"
+            for r in range(1, len(self.sv_a_data[0])):
+                excel_row = r + 1
+                # M (index 12): Supply CFM lookup where Fans.Type == "SUPPLY"
+                sup_formula = (f'=INDEX({fans_c}, '
+                               f'MATCH(1, INDEX(({fans_a}=A{excel_row})*({fans_b}="SUPPLY"), 0), 0))')
+                sv_sys_ws.write_formula(r, 12, sup_formula, number_format)
+                # N (index 13): OA CFM = F * M  (F is OA Ratio, M is Supply CFM)
+                sv_sys_ws.write_formula(r, 13, f'=F{excel_row} * M{excel_row}', number_format)
+                # O (index 14): Supply CFM/sf = M / D  (D is Floor Area)
+                sv_sys_ws.write_formula(r, 14, f'=M{excel_row} / D{excel_row}', workbook.add_format({'num_format': '0.0#'}))
+                # P (index 15): OA CFM/sf = N / D
+                sv_sys_ws.write_formula(r, 15, f'=N{excel_row} / D{excel_row}', workbook.add_format({'num_format': '0.0#'}))
+
+        # === Efficiency sheet (replicates openpyxl logic using visible TOTAL rows) ===
+        if self.ss_a_data and self.ss_h_data:
+            eff_ws = workbook.add_worksheet('Efficiency')
+            # Header
+            headers = [
+                'System', 'N/A', 'Cooling Load MMBtu', 'Heating Load MMBtu',
+                'Electric Heat Energy (kWh)', 'Electric Cool Energy (kWh)',
+                'Heat Eff', 'Cool Eff'
+            ]
+            eff_ws.write_row(0, 0, headers, header_format)
+
+            # Visible rows = those with 'TOTAL' in SS-A (like post-hide), SS-A data starts at row index 1
+            ss_a_visible = [row for row in self.ss_a_data[1:] if any(isinstance(v, str) and 'TOTAL' in v for v in row)]
+            ss_h_visible = [row for row in self.ss_h_data[1:] if any(isinstance(v, str) and 'TOTAL' in v for v in row)]
+
+            max_rows = min(len(ss_a_visible), len(ss_h_visible))
+            for i in range(max_rows):
+                a = ss_a_visible[i]
+                h = ss_h_visible[i]
+                # a[0] System, a[2] Cooling Energy (MBTU), a[8] Heating Energy (MBTU)
+                system = a[0]
+                cool_load = a[2]
+                heat_load = a[8]
+                elec_heat_kwh = h[8]   # Electric Heat Energy (kWh)
+                elec_cool_kwh = h[10]  # Electric Cool Energy (kWh)
+
+                row_idx = i + 1
+                eff_ws.write(row_idx, 0, system)
+                eff_ws.write(row_idx, 1, "N/A")
+                eff_ws.write(row_idx, 2, try_num(cool_load), number_format if is_num(cool_load) else None)
+                eff_ws.write(row_idx, 3, try_num(heat_load), number_format if is_num(heat_load) else None)
+                eff_ws.write(row_idx, 4, try_num(elec_heat_kwh), number_format if is_num(elec_heat_kwh) else None)
+                eff_ws.write(row_idx, 5, try_num(elec_cool_kwh), number_format if is_num(elec_cool_kwh) else None)
+
+                # Formulas
+                r = row_idx + 1  # Excel 1-based
+                eff_ws.write_formula(row_idx, 6, f'=IFERROR(ABS(D{r}/((E{r}*3.412)/1000)),"")', number_format)
+                eff_ws.write_formula(row_idx, 7, f'=IFERROR(C{r}/((F{r}*3.412)/1000),"")', number_format)
+
+            # Caution note (merged I1:P1)
+            eff_ws.merge_range('I1:P1',
+                               "⚠️ This does not account for energy consumption associated with chiller or boiler plants "
+                               "(or any other water-side equipment). Therefore, exercise caution when interpreting the "
+                               "efficiency values as they may not be accurate.",
+                               caution_merge_fmt)
 
         workbook.close()
 
-    def open_and_manipulate_in_excel(self):
-        wb = load_workbook(self.wb_name)
-        fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
-
-        # --- Hide irrelevant rows
-        targets = {'PS-C': ["SUM", 2], 'SS-A': ["TOTAL", 4], 'SS-H': ["TOTAL", 2], 'SS-L': ["ANNUAL", 2]}
-        for sheet_name, (keyword, start_row) in targets.items():
-            ws = wb[sheet_name]
-            for row in ws.iter_rows(min_row=start_row):
-                if not any(isinstance(cell.value, str) and keyword in cell.value for cell in row):
-                    ws.row_dimensions[row[0].row].hidden = True
-
-        # --- Create Efficiency sheet
-        ss_a, ss_h = wb['SS-A'], wb['SS-H']
-        efficiency = wb.create_sheet(title='Efficiency', index=wb.sheetnames.index('SS-H') + 1)
-
-        # --- Copy visible rows from SS-A
-        eff_row = 2
-        for row in ss_a.iter_rows(min_row=5, max_row=ss_a.max_row, max_col=16):
-            if not ss_a.row_dimensions[row[0].row].hidden:
-                for col_idx, cell in enumerate(row, start=1):
-                    efficiency.cell(row=eff_row, column=col_idx, value=cell.value)
-                eff_row += 1
-
-        # --- Delete columns D:H, then E:K (after shift)
-        for col in reversed(range(4, 9)):
-            efficiency.delete_cols(col)
-        for col in reversed(range(5, 11)):
-            efficiency.delete_cols(col)
-
-        # --- Copy visible values from SS-H columns I and K
-        for offset, col_letter in enumerate(['I', 'K']):
-            write_col = 5 + offset
-            row_eff = 1
-            for row in range(1, ss_h.max_row + 1):
-                if not ss_h.row_dimensions[row].hidden:
-                    val = ss_h[f'{col_letter}{row}'].value
-                    efficiency.cell(row=row_eff, column=write_col, value=val)
-                    row_eff += 1
-
-        # --- Format headers
-        headers = [
-            'System', 'N/A', 'Cooling Load MMBtu', 'Heating Load MMBtu',
-            'Electric Heat Energy (kWh)', 'Electric Cool Energy (kWh)',
-            'Heat Eff', 'Cool Eff'
-        ]
-        for col_idx, header in enumerate(headers, start=1):
-            cell = efficiency.cell(row=1, column=col_idx)
-            cell.value = header
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            cell.font = Font(bold=True)
-            cell.fill = fill
-
-        # --- Add formulas and caution message
-        last_eff_row = efficiency.max_row
-        while last_eff_row > 1 and efficiency.cell(row=last_eff_row, column=1).value is None:
-            last_eff_row -= 1
-        for row in range(2, last_eff_row + 1):
-            heat_formula = f'=IFERROR(ABS(D{row}/((E{row}*3.412)/1000)),"")'
-            efficiency.cell(row=row, column=7, value=heat_formula).number_format = '0.00'
-
-            cool_formula = f'=IFERROR(C{row}/((F{row}*3.412)/1000),"")'
-            efficiency.cell(row=row, column=8, value=cool_formula).number_format = '0.00'
-
-        efficiency.merge_cells('I1:P1')
-        caution = efficiency['I1']
-        caution.value = (
-            "⚠️ This does not account for energy consumption associated with chiller or boiler plants "
-            "(or any other water-side equipment). Therefore, exercise caution when interpreting the "
-            "efficiency values as they may not be accurate."
-        )
-        caution.font = Font(bold=True, color="FF0000")
-        caution.alignment = Alignment(horizontal='left', vertical='bottom', wrap_text=True)
-
-        # --- Add system lookup to SS-F
-        ss_f, ss_r = wb['SS-F'], wb['SS-R']
-        last_row_f = self._last_row(ss_f, [1])
-        last_row_r = self._last_row(ss_r, [1, 2])
-
-        range_a = f"'SS-R'!$A$2:$A${last_row_r}"
-        range_b = f"'SS-R'!$B$2:$B${last_row_r}"
-
-        for row in range(2, last_row_f + 1):
-            formula = f'=INDEX({range_a},MATCH(A{row},{range_b},0),1)'
-            ss_f.cell(row=row, column=11, value=formula)
-
-        self._format_header(ss_f.cell(row=1, column=11), "System", fill, size=14)
-
-        # --- Add formulas to SV-A Systems
-        systems, fans = wb['SV-A Systems'], wb['SV-A Fans']
-        last_row_systems = self._last_row(systems, [1])
-        last_row_fans = self._last_row(fans, [1, 2])
-
-        range_a = f"'SV-A Fans'!$A$2:$A${last_row_fans}"
-        range_b = f"'SV-A Fans'!$B$2:$B${last_row_fans}"
-        range_c = f"'SV-A Fans'!$C$2:$C${last_row_fans}"
-
-        for row in range(2, last_row_systems + 1):
-            systems.cell(row=row, column=13, value=(
-                f'=INDEX({range_c}, MATCH(1, INDEX(({range_a}=A{row})*({range_b}="SUPPLY"), 0), 0))'
-            )).number_format = '#,##0.0'
-
-            systems.cell(row=row, column=14, value=f'=F{row} * M{row}').number_format = '#,##0.0'
-            systems.cell(row=row, column=15, value=f'=M{row} / D{row}').number_format = '#,##0.0#'
-            systems.cell(row=row, column=16, value=f'=N{row} / D{row}').number_format = '#,##0.0#'
-
-        headers = [
-            ("Supply CFM", 13, 14),
-            ("OA CFM", 14, 14),
-            ("Supply CFM/sf", 15, 15),
-            ("OA CFM/sf", 16, 16)
-        ]
-        for text, col, size in headers:
-            self._format_header(systems.cell(row=1, column=col), text, fill, size=size)
-
-        wb.save(self.wb_name)
-        wb.close()
-
 
 def try_convert_element_to_float(item):
-    # Accept list/tuple; wrap scalars
     if not isinstance(item, (list, tuple)):
         li = [item]
     else:
@@ -1337,22 +1285,34 @@ def try_convert_element_to_float(item):
 
     out = []
     for ele in li:
-        # Treat None or empty string as blank cell
         if ele is None or (isinstance(ele, str) and ele.strip() == ""):
             out.append(None)
             continue
 
         try:
             f = float(ele)
-            # Replace NaN/Inf with blank (or "NaN", or 0, your choice)
             if math.isnan(f) or math.isinf(f):
-                out.append(None)   # change to "NaN" if you prefer to show text
+                out.append(None)
             else:
                 out.append(f)
         except (ValueError, TypeError):
-            # Leave non-numeric values (e.g., text) as-is
             out.append(ele)
     return out
+
+
+def is_num(x):
+    try:
+        float(x)
+        return True
+    except Exception:
+        return False
+
+
+def try_num(x):
+    try:
+        return float(x)
+    except Exception:
+        return x
 
 
 def main():
@@ -1360,19 +1320,15 @@ def main():
     window.withdraw()
     window.iconbitmap("icon.ico")
     os.remove("icon.ico")
-    # Open file select dialog to establish the filepath
     filepath = filedialog.askopenfilename(
         title="Select a SIM File", filetypes=(("SIM Files", "*.SIM"), ("All Files", "*.*"))
     )
 
-    # Create an instance of SIMFileReader and call various methods
     reader = SIMFileReader(filepath)
     if reader.file_path != '':
         reader.read_file()
         reader.parse_contents()
         reader.write_excel()
-        reader.open_and_manipulate_in_excel()
-
 
 
 if __name__ == "__main__":
