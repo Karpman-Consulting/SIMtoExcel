@@ -979,7 +979,7 @@ class SIMFileReader:
 
             pv_a1_ws = workbook.add_worksheet('PV-A Pumps')
             for row, data in enumerate(self.pv_a_data[1]):
-                if row == 0 or row == 1:
+                if row == 0:
                     pv_a1_ws.write_row(row, 0, data, header_format)
                 else:
                     data = try_convert_element_to_float(data)
