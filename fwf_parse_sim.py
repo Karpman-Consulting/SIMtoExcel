@@ -4,6 +4,10 @@ import tkinter as tk
 from tkinter import filedialog
 import xlsxwriter
 import math
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Alignment
+from openpyxl.worksheet.worksheet import Worksheet
 
 import add_logo
 
@@ -11,6 +15,8 @@ import add_logo
 class SIMFileReader:
     def __init__(self, sim_file_path):
         self.file_path = sim_file_path
+        self.file_name = "".join(os.path.basename(self.file_path).split('.')[:-1])
+        self.wb_name = os.path.join(os.path.dirname(self.file_path), f'{self.file_name} - SIM.xlsx')
         self.report_contents = {}
         self.doe_version = None
 
@@ -848,8 +854,8 @@ class SIMFileReader:
         return
 
     def write_excel(self):
-        file_name = "".join(os.path.basename(self.file_path).split('.')[:-1])
-        workbook = xlsxwriter.Workbook(os.path.join(os.path.dirname(self.file_path), f'{file_name} - SIM.xlsx'))
+        file_name = self.file_name
+        workbook = xlsxwriter.Workbook(self.wb_name)
         header_format = workbook.add_format({
             'bold': True,
             'align': 'center',
@@ -957,9 +963,7 @@ class SIMFileReader:
 
             ps_c_ws.write('T1', 'Heating Efficiency', t_column_format)
 
-            caution_text = (
-                "1. Click the filter button in cell B1 and then click OK to filter the data.  \n"
-                "2. ⚠️ If a piece of equipment provides both heating and cooling, "
+            caution_text = ("⚠️ If a piece of equipment provides both heating and cooling, "
                 "the calculated heating efficiency will not be accurate."
             )
 
@@ -978,7 +982,7 @@ class SIMFileReader:
 
             pv_a1_ws = workbook.add_worksheet('PV-A Pumps')
             for row, data in enumerate(self.pv_a_data[1]):
-                if row == 0:
+                if row == 0 or row == 1:
                     pv_a1_ws.write_row(row, 0, data, header_format)
                 else:
                     data = try_convert_element_to_float(data)
@@ -1007,7 +1011,7 @@ class SIMFileReader:
 
             # === CAUTION NOTES ===
             cautions = {
-                'A1': "⚠️ Load and Efficiency will not be Accurate unless Filter is initiated in Cell B3. Click filter button and then click OK",
+                'A1': "⚠️ Load and Efficiency will not be Accurate unless the 'TOTAL' Filter is Applied.",
                 'B1': "⚠️ QC that cells D2 and J2 align with the BEPU tab and that the BEPU tab is not missing data."
             }
 
@@ -1109,9 +1113,6 @@ class SIMFileReader:
 
             ss_h_ws.set_column(12, 12, 40)
 
-            filter_text = "Click the filter button in cell B1 and then click OK to filter the data.  "
-            ss_h_ws.write('M1', filter_text, caution_format)
-
         if self.ss_l_data:
             ss_l_ws = workbook.add_worksheet('SS-L')
             for row, data in enumerate(self.ss_l_data):
@@ -1131,9 +1132,7 @@ class SIMFileReader:
             ss_l_ws.filter_column(1, 'Type == ANNUAL')  # Column B
 
             ss_l_ws.set_column(20, 20, 40)
-            caution_format = workbook.add_format({'font_color': 'red', 'bold': True, 'text_wrap': True})
-            filter_text = "Click the filter button in cell B1 and then click OK to filter the data.  "
-            ss_l_ws.write('U1', filter_text, caution_format)
+
 
         if self.ss_r_data:
             ss_r_ws = workbook.add_worksheet('SS-R')
@@ -1198,6 +1197,78 @@ class SIMFileReader:
 
         workbook.close()
 
+    def open_and_manipulate_in_excel(self):
+        wb_name = self.wb_name
+        wb = load_workbook(wb_name)
+        ws_to_modify = {'PS-C': ["SUM", 2], 'SS-A': ["TOTAL", 4] , 'SS-H': ["TOTAL", 2], 'SS-L': ["ANNUAL", 2]}
+        for ws_name in ws_to_modify.keys():
+            ws = wb[ws_name]
+            header_row = ws_to_modify[ws_name][1]
+            does_it_contain_string = ws_to_modify[ws_name][0]
+            for row in ws.iter_rows(min_row=header_row):  # Skip header row
+                # Check if any cell in the row contains the value
+                contains_sum = any(
+                    isinstance(cell.value, str) and does_it_contain_string in cell.value
+                    for cell in row
+                )
+                if not contains_sum:
+                    ws.row_dimensions[row[0].row].hidden = True  # Hide the row
+
+        ss_a = wb['SS-A']
+        ss_h = wb['SS-H']
+
+        # Create Efficiency sheet after SS-H
+        efficiency = wb.create_sheet(title='Efficiency', index=wb.sheetnames.index('SS-H') + 1)
+
+        start_row_efficiency = 2  # Start writing at row 2
+        current_eff_row = start_row_efficiency
+
+        for row in ss_a.iter_rows(min_row=5, max_row=ss_a.max_row, max_col=16):  # A5:P...
+            row_idx = row[0].row
+            if not ss_a.row_dimensions[row_idx].hidden:
+                for col_idx, cell in enumerate(row, start=1):
+                    efficiency.cell(row=current_eff_row, column=col_idx, value=cell.value)
+                current_eff_row += 1
+
+        # --- Delete columns D:H (4 to 8), then E:K (now 4 to 10 after shift)
+        for col in reversed(range(4, 9)):  # D to H
+            efficiency.delete_cols(col)
+        for col in reversed(range(5, 11)):  # E to K
+            efficiency.delete_cols(col)
+
+        visible_row = 1  # Start writing at row 1 in Efficiency
+
+        for col_offset, col in enumerate(['I', 'K']):  # Only I and K
+            write_col = 5 + col_offset  # E=5, G=7
+            for row in range(1, ss_h.max_row + 1):
+                if not ss_h.row_dimensions[row].hidden:
+                    val = ss_h[f'{col}{row}'].value
+                    efficiency.cell(row=visible_row, column=write_col, value=val)
+                    visible_row += 1  # Advance only when writing a visible row
+            visible_row = 1  # Reset for next column
+
+        # --- Format headers
+        for col_idx, header in zip([7, 8], ['Heat Eff', 'Cool Eff']):  # G, H
+            cell = efficiency.cell(row=1, column=col_idx)
+            cell.value = header
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        # --- Add formulas from row 2 to 42
+        for row in range(2, 43):
+            # Heat Efficiency: =IFERROR(ABS(D2/((E2*3.412)/1000)),"")
+            heat_formula = f'=IFERROR(ABS(D{row}/((E{row}*3.412)/1000)),"")'
+            efficiency.cell(row=row, column=7, value=heat_formula)
+
+            # Cool Efficiency: =IFERROR(A{row}/((E{row}*3.412)/1000),"")
+            cool_formula = f'=IFERROR(A{row}/((E{row}*3.412)/1000),"")'
+            efficiency.cell(row=row, column=8, value=cool_formula)
+
+            # Format cells
+            for col in [7, 8]:
+                efficiency.cell(row=row, column=col).number_format = '0.00'
+
+        wb.save(wb_name)
+
 
 def try_convert_element_to_float(item):
     # Accept list/tuple; wrap scalars
@@ -1242,6 +1313,8 @@ def main():
         reader.read_file()
         reader.parse_contents()
         reader.write_excel()
+        reader.open_and_manipulate_in_excel()
+
 
 
 if __name__ == "__main__":
