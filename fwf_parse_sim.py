@@ -6,7 +6,7 @@ import xlsxwriter
 import math
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import Alignment
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
 import add_logo
@@ -50,6 +50,17 @@ class SIMFileReader:
             "SV-A": "parse_sv_a",
         }
 
+    def _last_row(self, sheet, columns):
+        row = sheet.max_row
+        while row > 1 and all(sheet.cell(row=row, column=col).value is None for col in columns):
+            row -= 1
+        return row
+
+    def _format_header(self, cell, text, fill, size=12):
+        cell.value = text
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.font = Font(bold=True, size=size)
+        cell.fill = fill
     @staticmethod
     def clean(val):
         try:
@@ -932,7 +943,8 @@ class SIMFileReader:
             t_column_format = workbook.add_format({
                 'bold': True,
                 'font_size': 14,
-                'text_wrap': True
+                'text_wrap': True,
+                'bg_color': '#D9E1F2'
             })
 
             caution_format_ps_c = workbook.add_format({
@@ -1198,76 +1210,122 @@ class SIMFileReader:
         workbook.close()
 
     def open_and_manipulate_in_excel(self):
-        wb_name = self.wb_name
-        wb = load_workbook(wb_name)
-        ws_to_modify = {'PS-C': ["SUM", 2], 'SS-A': ["TOTAL", 4] , 'SS-H': ["TOTAL", 2], 'SS-L': ["ANNUAL", 2]}
-        for ws_name in ws_to_modify.keys():
-            ws = wb[ws_name]
-            header_row = ws_to_modify[ws_name][1]
-            does_it_contain_string = ws_to_modify[ws_name][0]
-            for row in ws.iter_rows(min_row=header_row):  # Skip header row
-                # Check if any cell in the row contains the value
-                contains_sum = any(
-                    isinstance(cell.value, str) and does_it_contain_string in cell.value
-                    for cell in row
-                )
-                if not contains_sum:
-                    ws.row_dimensions[row[0].row].hidden = True  # Hide the row
+        wb = load_workbook(self.wb_name)
+        fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
 
-        ss_a = wb['SS-A']
-        ss_h = wb['SS-H']
+        # --- Hide irrelevant rows
+        targets = {'PS-C': ["SUM", 2], 'SS-A': ["TOTAL", 4], 'SS-H': ["TOTAL", 2], 'SS-L': ["ANNUAL", 2]}
+        for sheet_name, (keyword, start_row) in targets.items():
+            ws = wb[sheet_name]
+            for row in ws.iter_rows(min_row=start_row):
+                if not any(isinstance(cell.value, str) and keyword in cell.value for cell in row):
+                    ws.row_dimensions[row[0].row].hidden = True
 
-        # Create Efficiency sheet after SS-H
+        # --- Create Efficiency sheet
+        ss_a, ss_h = wb['SS-A'], wb['SS-H']
         efficiency = wb.create_sheet(title='Efficiency', index=wb.sheetnames.index('SS-H') + 1)
 
-        start_row_efficiency = 2  # Start writing at row 2
-        current_eff_row = start_row_efficiency
-
-        for row in ss_a.iter_rows(min_row=5, max_row=ss_a.max_row, max_col=16):  # A5:P...
-            row_idx = row[0].row
-            if not ss_a.row_dimensions[row_idx].hidden:
+        # --- Copy visible rows from SS-A
+        eff_row = 2
+        for row in ss_a.iter_rows(min_row=5, max_row=ss_a.max_row, max_col=16):
+            if not ss_a.row_dimensions[row[0].row].hidden:
                 for col_idx, cell in enumerate(row, start=1):
-                    efficiency.cell(row=current_eff_row, column=col_idx, value=cell.value)
-                current_eff_row += 1
+                    efficiency.cell(row=eff_row, column=col_idx, value=cell.value)
+                eff_row += 1
 
-        # --- Delete columns D:H (4 to 8), then E:K (now 4 to 10 after shift)
-        for col in reversed(range(4, 9)):  # D to H
+        # --- Delete columns D:H, then E:K (after shift)
+        for col in reversed(range(4, 9)):
             efficiency.delete_cols(col)
-        for col in reversed(range(5, 11)):  # E to K
+        for col in reversed(range(5, 11)):
             efficiency.delete_cols(col)
 
-        visible_row = 1  # Start writing at row 1 in Efficiency
-
-        for col_offset, col in enumerate(['I', 'K']):  # Only I and K
-            write_col = 5 + col_offset  # E=5, G=7
+        # --- Copy visible values from SS-H columns I and K
+        for offset, col_letter in enumerate(['I', 'K']):
+            write_col = 5 + offset
+            row_eff = 1
             for row in range(1, ss_h.max_row + 1):
                 if not ss_h.row_dimensions[row].hidden:
-                    val = ss_h[f'{col}{row}'].value
-                    efficiency.cell(row=visible_row, column=write_col, value=val)
-                    visible_row += 1  # Advance only when writing a visible row
-            visible_row = 1  # Reset for next column
+                    val = ss_h[f'{col_letter}{row}'].value
+                    efficiency.cell(row=row_eff, column=write_col, value=val)
+                    row_eff += 1
 
         # --- Format headers
-        for col_idx, header in zip([7, 8], ['Heat Eff', 'Cool Eff']):  # G, H
+        headers = [
+            'System', 'N/A', 'Cooling Load MMBtu', 'Heating Load MMBtu',
+            'Electric Heat Energy (kWh)', 'Electric Cool Energy (kWh)',
+            'Heat Eff', 'Cool Eff'
+        ]
+        for col_idx, header in enumerate(headers, start=1):
             cell = efficiency.cell(row=1, column=col_idx)
             cell.value = header
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.font = Font(bold=True)
+            cell.fill = fill
 
-        # --- Add formulas from row 2 to 42
-        for row in range(2, 43):
-            # Heat Efficiency: =IFERROR(ABS(D2/((E2*3.412)/1000)),"")
+        # --- Add formulas and caution message
+        last_eff_row = efficiency.max_row
+        while last_eff_row > 1 and efficiency.cell(row=last_eff_row, column=1).value is None:
+            last_eff_row -= 1
+        for row in range(2, last_eff_row + 1):
             heat_formula = f'=IFERROR(ABS(D{row}/((E{row}*3.412)/1000)),"")'
-            efficiency.cell(row=row, column=7, value=heat_formula)
+            efficiency.cell(row=row, column=7, value=heat_formula).number_format = '0.00'
 
-            # Cool Efficiency: =IFERROR(A{row}/((E{row}*3.412)/1000),"")
-            cool_formula = f'=IFERROR(A{row}/((E{row}*3.412)/1000),"")'
-            efficiency.cell(row=row, column=8, value=cool_formula)
+            cool_formula = f'=IFERROR(C{row}/((F{row}*3.412)/1000),"")'
+            efficiency.cell(row=row, column=8, value=cool_formula).number_format = '0.00'
 
-            # Format cells
-            for col in [7, 8]:
-                efficiency.cell(row=row, column=col).number_format = '0.00'
+        efficiency.merge_cells('I1:P1')
+        caution = efficiency['I1']
+        caution.value = (
+            "⚠️ This does not account for energy consumption associated with chiller or boiler plants "
+            "(or any other water-side equipment). Therefore, exercise caution when interpreting the "
+            "efficiency values as they may not be accurate."
+        )
+        caution.font = Font(bold=True, color="FF0000")
+        caution.alignment = Alignment(horizontal='left', vertical='bottom', wrap_text=True)
 
-        wb.save(wb_name)
+        # --- Add system lookup to SS-F
+        ss_f, ss_r = wb['SS-F'], wb['SS-R']
+        last_row_f = self._last_row(ss_f, [1])
+        last_row_r = self._last_row(ss_r, [1, 2])
+
+        range_a = f"'SS-R'!$A$2:$A${last_row_r}"
+        range_b = f"'SS-R'!$B$2:$B${last_row_r}"
+
+        for row in range(2, last_row_f + 1):
+            formula = f'=INDEX({range_a},MATCH(A{row},{range_b},0),1)'
+            ss_f.cell(row=row, column=11, value=formula)
+
+        self._format_header(ss_f.cell(row=1, column=11), "System", fill, size=14)
+
+        # --- Add formulas to SV-A Systems
+        systems, fans = wb['SV-A Systems'], wb['SV-A Fans']
+        last_row_systems = self._last_row(systems, [1])
+        last_row_fans = self._last_row(fans, [1, 2])
+
+        range_a = f"'SV-A Fans'!$A$2:$A${last_row_fans}"
+        range_b = f"'SV-A Fans'!$B$2:$B${last_row_fans}"
+        range_c = f"'SV-A Fans'!$C$2:$C${last_row_fans}"
+
+        for row in range(2, last_row_systems + 1):
+            systems.cell(row=row, column=13, value=(
+                f'=INDEX({range_c}, MATCH(1, INDEX(({range_a}=A{row})*({range_b}="SUPPLY"), 0), 0))'
+            )).number_format = '#,##0.0'
+
+            systems.cell(row=row, column=14, value=f'=F{row} * M{row}').number_format = '#,##0.0'
+            systems.cell(row=row, column=15, value=f'=M{row} / D{row}').number_format = '#,##0.0#'
+            systems.cell(row=row, column=16, value=f'=N{row} / D{row}').number_format = '#,##0.0#'
+
+        headers = [
+            ("Supply CFM", 13, 14),
+            ("OA CFM", 14, 14),
+            ("Supply CFM/sf", 15, 15),
+            ("OA CFM/sf", 16, 16)
+        ]
+        for text, col, size in headers:
+            self._format_header(systems.cell(row=1, column=col), text, fill, size=size)
+
+        wb.save(self.wb_name)
+        wb.close()
 
 
 def try_convert_element_to_float(item):
