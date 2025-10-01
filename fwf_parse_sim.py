@@ -54,7 +54,7 @@ class SIMFileReader:
             return ""
 
     def read_file(self):
-        with open(self.file_path) as f:
+        with open(self.file_path, "r", encoding="iso-8859-1") as f:
             sim_contents = f.read().splitlines()
 
         active_report = None
@@ -109,8 +109,8 @@ class SIMFileReader:
             "------",
             "BDL RUN",
         ]
-        end_use_spans = [(4, 12), (12, 21), (21, 30), (30, 41), (41, 50), (50, 59), (59, 69), (69, 78), (78, 87),
-                         (87, 96), (96, 105), (105, 114), (114, 122), (122, 132)]
+        end_use_spans = [(4, 12), (12, 21), (21, 30), (30, 39), (39, 48), (48, 57), (57, 66), (66, 75), (75, 84),
+                         (84, 93), (93, 102), (102, 111), (111, 120), (120, 130)]
 
         lines = self.report_contents['BEPU']
 
