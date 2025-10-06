@@ -17,6 +17,7 @@ class SIMFileReader:
         self.doe_version = None
 
         self.bepu_data = None
+        self.ls_b_data = None
         self.lv_b_data = None
         self.lv_d_data = None
         self.ps_c_data = None
@@ -32,6 +33,7 @@ class SIMFileReader:
 
         self.parsing_methods = {
             "BEPU": "parse_bepu",
+            "LS-B": "parse_ls_b",
             "LV-B": "parse_lv_b",
             "LV-D": "parse_lv_d",
             "PS-C": "parse_ps_c",
@@ -58,7 +60,7 @@ class SIMFileReader:
             sim_contents = f.read().splitlines()
 
         active_report = None
-        system_or_zone = ""
+        system_zone_or_space = ""
         active_report_contents = []
         i = 0
         while i < len(sim_contents):
@@ -74,10 +76,10 @@ class SIMFileReader:
                 index = line.index("REPORT- ") + len("REPORT- ")
                 report = line[index:index + 4]
 
-                # These reports occur per system/zone, so we need to parse the system/zone name
-                if report in ["SS-A", "SS-B", "SS-F", "SS-G", "SS-H", "SS-L", "SS-R", "SV-A"]:
+                # These reports occur per system/zone/space, so we need to parse the system/zone/space name
+                if report in ["LS-B", "SS-A", "SS-B", "SS-F", "SS-G", "SS-H", "SS-L", "SS-R", "SV-A"]:
                     parts: list[str] = re.split(r"\s{2,}", line)
-                    system_or_zone = parts[1].strip()
+                    system_zone_or_space = parts[1].strip()
                 if active_report is None:
                     active_report = report
                 if report != active_report:
@@ -91,8 +93,8 @@ class SIMFileReader:
 
             elif active_report is not None:
                 # These reports need the system/zone parsed from the "REPORT- " line
-                if active_report in ["SS-A", "SS-B", "SS-F", "SS-G", "SS-H", "SS-L", "SS-R", "SV-A"]:
-                    active_report_contents.append((system_or_zone, line))
+                if active_report in ["LS-B", "SS-A", "SS-B", "SS-F", "SS-G", "SS-H", "SS-L", "SS-R", "SV-A"]:
+                    active_report_contents.append((system_zone_or_space, line))
                 else:
                     active_report_contents.append(line)
 
@@ -144,6 +146,74 @@ class SIMFileReader:
                 meter_data_lines_ctr += 1
 
         self.bepu_data = data
+
+    def parse_ls_b(self):
+        skipline_substrings = [
+            "------",
+            "======",
+            "*",
+            "MULTIPLIER",
+            "FLOOR  AREA",
+            "VOLUME",
+            "TIME",
+            "DRY-BULB TEMP",
+            "WET-BULB TEMP",
+            "TOT HORIZONTAL SOLAR RAD",
+            "WINDSPEED AT SPACE",
+            "CLOUD AMOUNT 0(CLEAR)-10",
+            "COOLING  LOAD",
+            "HEATING  LOAD",
+            "SENSIBLE",
+            "(KBTU/H)    ( KW )  (KBTU/H)  ( KW )",
+        ]
+        skipline_start_substrings = [
+            "SPACE",
+        ]
+        headers = [
+            "SPACE NAME",
+            "LOAD CATEGORY",
+            "COOLING SENSIBLE (KBTU/H)",
+            "COOLING LATENT (KBTU/H)",
+            "HEATING SENSIBLE (KBTU/H)",
+            "TOTAL COOLING INTENSITY (BTU/H/FT2)",
+            "TOTAL HEATING INTENSITY (BTU/H/FT2)",
+        ]
+        category_name_span = (5, 28)
+        category_spans = [(28, 36), (48, 56), (85, 93)]
+        total_spans = [(28, 36), (75, 83)]
+        data = [headers]
+        lines = self.report_contents['LS-B']
+
+        for space_name, line in lines:
+
+            if (
+                any(substring in line for substring in skipline_substrings)
+                or any(line.startswith(skipline_start_substring) for skipline_start_substring in skipline_start_substrings)
+                or len(line.strip()) == 0
+            ):
+                continue
+
+            load_category = line[category_name_span[0]:category_name_span[1]].strip()
+            if "TOTAL LOAD" in load_category:
+                line_data = [space_name, load_category, "", "", ""]
+                for start, end in total_spans:
+                    try:
+                        line_data.append(self.clean(line[start:end].strip()))
+                    except ValueError:
+                        line_data.append("")
+
+            else:
+                line_data = [space_name, load_category]
+                for start, end in category_spans:
+                    try:
+                        line_data.append(self.clean(line[start:end].strip()))
+                    except ValueError:
+                        line_data.append("")
+
+            data.append(line_data)
+
+        self.ls_b_data = data
+        return
 
     def parse_lv_b(self):
         skipline_substrings = [
@@ -884,6 +954,33 @@ class SIMFileReader:
                     data = try_convert_element_to_float(data)
                     bepu_ws.write_row(row, 0, data)
             bepu_ws.set_column(0, len(self.bepu_data[0]) - 1, 15)
+
+        # === LS-B ===
+        if self.ls_b_data:
+            ls_b_ws = workbook.add_worksheet('LS-B')
+            numeric_cols = {2, 3, 4, 5, 6}  # columns containing numeric data
+
+            for row_idx, row_data in enumerate(self.ls_b_data):
+                for col_idx, value in enumerate(row_data):
+                    if row_idx == 0:
+                        ls_b_ws.write(row_idx, col_idx, value, header_format)
+                    else:
+                        if col_idx in numeric_cols:
+                            try:
+                                ls_b_ws.write_number(row_idx, col_idx, float(value), number_format)
+                            except ValueError:
+                                ls_b_ws.write(row_idx, col_idx, value, string_format)
+                        else:
+                            ls_b_ws.write_string(row_idx, col_idx, str(value), string_format)
+
+            # Column width tuning for readability
+            ls_b_ws.set_column(0, 0, 30)  # SPACE NAME
+            ls_b_ws.set_column(1, 1, 27)  # LOAD CATEGORY
+            ls_b_ws.set_column(2, 4, 18)  # Cooling/Heating sensible
+            ls_b_ws.set_column(5, 6, 22)  # Intensities
+
+            # Enable autofilter over the entire table (no default filters applied)
+            ls_b_ws.autofilter(0, 0, len(self.ls_b_data) - 1, len(self.ls_b_data[0]) - 1)
 
         # === LV-B ===
         if self.lv_b_data:
