@@ -1,0 +1,59 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]           # anytime tag starts with v (e.g., v1.0.0)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: "x64"
+
+      - name: Install PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Clean old builds
+        run: |
+          Remove-Item -Recurse -Force build, dist, *.spec -ErrorAction SilentlyContinue
+
+      - name: Build executable
+        run: |
+          pyinstaller --onefile --noconsole --icon="KC_logo.ico" fwf_parse_sim.py
+
+      - name: Upload artifact (workflow run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fwf_parse_sim
+          path: dist/fwf_parse_sim.exe
+
+      # On tags like v1.2.3: zip and publish a Release with the EXE
+      - name: Zip release bundle
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          New-Item -ItemType Directory -Force -Path release
+          Copy-Item dist/fwf_parse_sim.exe release/
+          Compress-Archive -Path release/* -DestinationPath fwf_parse_sim-Windows.zip -Force
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: fwf_parse_sim-Windows.zip
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
