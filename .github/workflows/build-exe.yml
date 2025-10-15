@@ -22,10 +22,14 @@ jobs:
           python-version: "3.11"
           architecture: "x64"
 
+      - name: Install pipenv and project dependencies
+        run: |
+          pip install pipenv
+          pipenv install --deploy --ignore-pipfile
+
       - name: Install PyInstaller
         run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller
+          pipenv install pyinstaller
 
       - name: Clean old builds
         run: |
@@ -33,7 +37,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --noconsole --icon="KC_logo.ico" fwf_parse_sim.py
+          pipenv run pyinstaller --onefile --noconsole --icon="KC_logo.ico" fwf_parse_sim.py
 
       - name: Upload artifact (workflow run)
         uses: actions/upload-artifact@v4
