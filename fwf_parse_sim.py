@@ -920,7 +920,7 @@ class SIMFileReader:
         return
 
     def write_excel(self):
-        workbook = xlsxwriter.Workbook(self.wb_name)
+        workbook = xlsxwriter.Workbook(self.wb_name, {'nan_inf_to_errors': True})
 
         # --- Formats
         header_format = workbook.add_format({
