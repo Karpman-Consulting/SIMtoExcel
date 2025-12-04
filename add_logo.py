@@ -1070,7 +1070,8 @@ AAAAAAAAAAA=
 """
 icondata = base64.b64decode(icon)
 
-tempFile = "icon.ico"
+tmp_dir = Path(tempfile.gettempdir())
+tempFile = tmp_dir / "icon.ico"
 iconfile = open(tempFile,"wb")
 iconfile.write(icondata)
 iconfile.close()
