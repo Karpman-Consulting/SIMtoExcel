@@ -1,9 +1,10 @@
 import base64
+import tempfile
+from pathlib import Path
 
 
 # The Base64 icon version as a string
-icon = \
-""" 
+icon = """ 
 AAABAAEAengAAAEAIABo7AAAFgAAACgAAAB6AAAA8AAAAAEAIAAAAAAAwOQAAMMOAADDDgAAAAAA
 AAAAAAD/////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////
