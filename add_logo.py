@@ -1069,10 +1069,13 @@ AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 AAAAAAAAAAA=
 """
-icondata = base64.b64decode(icon)
 
+icondata = base64.b64decode(icon)
 tmp_dir = Path(tempfile.gettempdir())
-tempFile = tmp_dir / "icon.ico"
-iconfile = open(tempFile,"wb")
-iconfile.write(icondata)
-iconfile.close()
+icon_path = tmp_dir / "icon.ico"
+
+with open(icon_path, "wb") as f:
+    f.write(icondata)
+
+# expose the path for the caller
+ICON_PATH = icon_path

@@ -1,11 +1,14 @@
 import re
 import os
-import tkinter as tk
-from tkinter import filedialog
+import base64
+import tempfile
 import xlsxwriter
 import math
+import tkinter as tk
+from pathlib import Path
+from tkinter import filedialog
 
-import add_logo
+from add_logo import ICON_PATH
 
 
 class SIMFileReader:
@@ -1415,14 +1418,15 @@ def try_num(x):
 def main():
     window = tk.Tk()
     window.withdraw()
-    window.iconbitmap("icon.ico")
-    os.remove("icon.ico")
+    window.iconbitmap(str(ICON_PATH))
+
     filepath = filedialog.askopenfilename(
-        title="Select a SIM File", filetypes=(("SIM Files", "*.SIM"), ("All Files", "*.*"))
+        title="Select a SIM File",
+        filetypes=(("SIM Files", "*.SIM"), ("All Files", "*.*"))
     )
 
-    reader = SIMFileReader(filepath)
-    if reader.file_path != '':
+    if filepath:
+        reader = SIMFileReader(filepath)
         reader.read_file()
         reader.parse_contents()
         reader.write_excel()
