@@ -1,14 +1,11 @@
 import re
 import os
-import base64
-import tempfile
 import xlsxwriter
 import math
 import tkinter as tk
-from pathlib import Path
 from tkinter import filedialog
 
-from add_logo import ICON_PATH
+from sim_to_excel.add_logo import ICON_PATH
 
 
 class SIMFileReader:
