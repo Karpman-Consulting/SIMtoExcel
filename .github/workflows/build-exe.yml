@@ -37,9 +37,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pipenv run pyinstaller --onefile --noconsole ^
-            --icon="KC_logo.ico" ^
-            sim_to_excel/SIMtoExcel.py
+          pipenv run pyinstaller --onefile --noconsole --icon="KC_logo.ico" sim_to_excel/SIMtoExcel.py
 
       - name: Upload artifact (workflow run)
         uses: actions/upload-artifact@v4
